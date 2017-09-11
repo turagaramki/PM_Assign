@@ -1,5 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import os
+import glob
+
 
 plt.close('all')
 # plt.ion()
@@ -15,7 +18,7 @@ class Panel:
         self.contol_point=0.5*(self.start+self.end)
         self.strength=strength
         self.pnl_type=pnl_type
-              
+
     def vortexpanel_coeff(self,field):
         if self.pnl_type==0:
             zprime=(field-self.start)*self.t.conjugate()#np.exp(-1j*self.theta)
@@ -29,7 +32,7 @@ class Panel:
             self.coeff.append(complex_coeff1.conjugate())
             self.coeff.append(complex_coeff2.conjugate())
         return self.coeff
-    
+
     def vortexpanel_vel(self,field,strength):
         if self.pnl_type==0:
             zprime=(field-self.start)*self.t.conjugate()#np.exp(-1j*self.theta)
@@ -40,24 +43,24 @@ class Panel:
             zprime=(field-self.start)*self.t.conjugate()
             complex_vel1=1j*strength[0]/(2*np.pi)*((zprime/self.l-1)*np.log((zprime-self.l)/zprime)+1.0)*self.t.conjugate()
             complex_vel2=-1j*strength[1]/(2*np.pi)*((zprime/self.l)*np.log((zprime-self.l)/zprime)+1.0)*self.t.conjugate()
-            self.complex_vel=complex_vel1.conjugate()+complex_vel2.conjugate()
+            self.complex_vel=(complex_vel1+complex_vel2).conjugate()
 #             self.complex_vel.append(complex_vel2.conjugate())
- 
+
         return self.complex_vel
-    
+
     def panel_normal(self,origin):
         self.normal=(self.contol_point-origin)/np.abs(self.contol_point-origin)
 
     def draw(self):
         plt.plot([self.start.real,self.end.real],[self.start.imag,self.end.imag],linewidth=6,c='#0000ff')
         plt.plot(self.contol_point.real,self.contol_point.imag,'o',c='y')
-        
-        
+
+
 def vortex_vel(z, vortex_pos, vortex_str):
     return (-1j*vortex_str/(2*np.pi*(z - vortex_pos))).conjugate()
 
 def source_vel(z, source_pos, source_str):
-    return (source_str*np.log(z - source_pos)).conjugate() 
+    return (source_str*np.log(z - source_pos)).conjugate()
 
 
 
@@ -70,48 +73,6 @@ def create_mesh(x_low = -2, x_up = 2,n_x = 100,y_low = -2, y_up = 2,n_y = 100 ):
     z = X+1j*Y
     return z
 
-def single_panel(angle=0,pnl_type=0):
-    plt.close('all')
-    plt.figure(figsize=(15,7.5))
-
-    if pnl_type==0:
-        gamma=1.0
-    else:
-        gamma=[]
-        gamma.append(1.0)
-        gamma.append(1.5)
-#     print(gamma[0])
-    angles=np.linspace(0,180,11)
-    start=complex(1.0,1.0)
-    end=complex(start.real+np.cos(angle*np.pi/180),start.imag+np.sin(angle*np.pi/180))
-    
-    c=0.5*(start+end)
-
-    z = create_mesh(x_low=c.real-2,x_up=c.real+2,n_x=100, y_low=c.imag-1,y_up=c.imag+1,n_y=100)
-
-    P=Panel(start,end,pnl_type=pnl_type)
-    P.vortexpanel_coeff(z)
-    P.vortexpanel_vel(z,gamma)
-#     print(len(P.coeff))
-    P.draw()
-    complex_vel = P.complex_vel+V#+freestream_phi(V,z) + 
-
-    plt.streamplot(z.real,z.imag,complex_vel.real,complex_vel.imag)
-    plt.axis('equal')
-    plt.grid('on')
-    plt.xlabel('X',fontsize=18)
-    plt.ylabel('Y',fontsize=18)
-#     print(P.pnl_type)
-    if P.pnl_type==0:
-        title='Single Panel with Constant vorticity'
-    else:
-        title='Single Panel with Linear vorticity'
-        
-    plt.title(title,fontsize=18)
-    plt.xticks(fontsize=12)
-    plt.yticks(fontsize=12)
-    
-
 def complex_mult(a,b):
     return a.real*b.real+a.imag*b.imag
 
@@ -120,7 +81,15 @@ def assemble_coeff_mat(Ps):
     cm=np.zeros([no_panels+1,no_panels],dtype=complex)
     for i in range(no_panels):
         for j in range(no_panels):
-            cm[i,j]=complex_mult(Ps[j].vortexpanel_coeff(Ps[i].contol_point),Ps[i].normal)
+            if Ps[j].pnl_type==0:
+                cm[i,j]=complex_mult(Ps[j].vortexpanel_coeff(Ps[i].contol_point),Ps[i].normal)
+            else:
+                cm[i,j]+=complex_mult(Ps[j].vortexpanel_coeff(Ps[i].contol_point)[0],Ps[i].normal)
+                if j<no_panels-1:
+                    cm[i,j+1]+=complex_mult(Ps[j].vortexpanel_coeff(Ps[i].contol_point)[1],Ps[i].normal)
+                else:
+                    cm[i,0]+=complex_mult(Ps[j].vortexpanel_coeff(Ps[i].contol_point)[1],Ps[i].normal)
+        #             print(i,j)
 #     print(np.shape(cm))
     return cm
 
@@ -134,15 +103,15 @@ def assemble_b_mat(Ps,V, vortex_pos=[0.0+0.0j], vortex_str=[0.0+0.0j], source_po
         v_vortex = 0.0 + 0.0j
         for j, z in enumerate(vortex_pos):
             v_vortex += vortex_vel(Ps[i].contol_point, z, vortex_str[j])
-        
+
         V_final=V + v_source + v_vortex
         bm[i]=-complex_mult(V_final,Ps[i].normal)
-        
+
 #     print(np.shape(bm))
     return bm
 
 def generate_panels(no_panels,radius,origin,pnl_type=0):
-    radians = np.linspace(0,2*np.pi,no_panels+1) 
+    radians = np.linspace(0,2*np.pi,no_panels+1)
     points = origin + radius*(np.cos(radians) +1j*np.sin(radians))
     end = points[1:]
     start = points[:-1]
@@ -164,8 +133,8 @@ def rk2_integrate(z,z_src,vort_gama,Vinf, dt ,tf,Ps,cm):
         z += k1
         vel = get_velocity(Ps,Vinf,z,vort_gama,cm)
         k2 = vel*dt
-        z += 0.5*(-k1 + k2) 
-        result.append(z.copy()) 
+        z += 0.5*(-k1 + k2)
+        result.append(z.copy())
         t += dt
 #         print t,z
     return np.asarray(result)
@@ -178,30 +147,98 @@ def get_velocity(Ps,Vinf,vortex_pos,vortex_str,cm):
     for i in range(len(Ps)):
         Ps[i].vortexpanel_vel(vortex_pos,gamma_mat[i])
         Comple_vel+=Ps[i].complex_vel
-       
+
     return Comple_vel
 
 def points_generate(num_points,pcr,center):
-    radians = np.linspace(0,2*np.pi,num_points+1)[:-1] 
+    radians = np.linspace(0,2*np.pi,num_points+1)[:-1]
     points = center + pcr*(np.cos(radians) +1j*np.sin(radians))
     return points,radians
-    
+
 def exact_vel(points,radians,Vinf,cr,pcr):
     Vr=np.abs(Vinf)*(1-cr**2/pcr**2)*np.cos(radians)
     Vt=-np.abs(Vinf)*(1+cr**2/pcr**2)*np.sin(radians)
     Vexact=np.sqrt(Vr**2+Vt**2)
     return Vexact
 
+def rk2_integrate1(z,z_src,strength,V, dt ,tf):
+    result = [z]
+    t = 0.0
+    while t < tf:
+        vel = get_vel(z, z_src, strength, V)
+        k1 = vel*dt
+        z += k1
+        vel = get_vel(z, z_src, strength, V)
+        k2 = vel*dt
+        z += 0.5*(-k1 + k2)
+        result.append(z.copy())
+        t += dt
+    return np.asarray(result)
 
-def problem1(n,r):
+def get_vel(z,z_src,strength,V):
+    vel = np.zeros_like(z)
+    for i,z_i in enumerate(z):
+#         print(z_i)
+        for j,z_j in enumerate(z_src):
+#             print(z_j)
+            if z_i != z_j:
+                vel[i] += vortex_vel(z_i,z_j,strength[j])
+    vel += V
+    return vel
+
+
+########################################################################################################################
+def single_panel(angle=0,pnl_type=0):
+#     plt.close('all')
+    plt.figure(figsize=(15,7.5))
+
+    if pnl_type==0:
+        gamma=1.0
+    else:
+        gamma=[]
+        gamma.append(1)
+        gamma.append(10)
+#     print(gamma[0])
+    angles=np.linspace(0,180,11)
+    start=complex(0,0.0)
+    end=complex(start.real+np.cos(angle*np.pi/180),start.imag+np.sin(angle*np.pi/180))
+
+    c=0.5*(start+end)
+
+    z = create_mesh(x_low=c.real-2,x_up=c.real+2,n_x=100, y_low=c.imag-1,y_up=c.imag+1,n_y=100)
+
+    P=Panel(start,end,pnl_type=pnl_type)
+    P.vortexpanel_coeff(z)
+    P.vortexpanel_vel(z,gamma)
+#     print(len(P.coeff))
+    P.draw()
+    complex_vel = P.complex_vel+V#+freestream_phi(V,z) +
+
+    plt.streamplot(z.real,z.imag,complex_vel.real,complex_vel.imag)
+    plt.axis('equal')
+    plt.grid('on')
+    plt.xlabel('X',fontsize=18)
+    plt.ylabel('Y',fontsize=18)
+#     print(P.pnl_type)
+    if P.pnl_type==0:
+        title='Single Panel with Constant vorticity'
+    else:
+        title='Single Panel with Linear vorticity'
+
+    plt.title(title,fontsize=18)
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
+
+def problem1(n,r,pnl_type=0):
     no_panels=n
     radius=r
     origin=complex(0,0)
     Vinf=complex(1.0,0)
 
-    z = create_mesh(x_low=-2+origin.real-r,x_up=2+origin.real+r,n_x=100, y_low=-1+origin.imag-r,y_up=1+origin.imag+r,n_y=100)
+    z = create_mesh(x_low=-2+origin.real-r,x_up=2+origin.real+r,n_x=100,
+                    y_low=-1+origin.imag-r,y_up=1+origin.imag+r,n_y=100)
 
-    Ps=generate_panels(no_panels,radius,origin)
+    Ps=generate_panels(no_panels,radius,origin,pnl_type=pnl_type)
 
     cm=assemble_coeff_mat(Ps)
     bm=assemble_b_mat(Ps,Vinf).real
@@ -212,14 +249,31 @@ def problem1(n,r):
 
 #     gamma_mat=np.linalg.solve(cm,bm)
     gamma_mat=np.linalg.lstsq(cm,bm)[0]
-    # print(gamma_mat)
+#     print(gamma_mat)
+#         print stren
 
     Comple_vel=Vinf
     for i in range(no_panels):
-        Ps[i].vortexpanel_vel(z,gamma_mat[i])
-        Comple_vel+=Ps[i].complex_vel
+        if Ps[i].pnl_type==0:
+            Ps[i].vortexpanel_vel(z,gamma_mat[i].real)
+            Comple_vel+=Ps[i].complex_vel
+        else:
+#             print(gamma_mat[i])
+            stren=np.zeros([2])
+            if i<no_panels-1:
+                stren[0]+=gamma_mat[i].real
+                stren[1]+=gamma_mat[i+1].real
 
-    plt.figure(figsize=(15,7.5))    
+            else:
+                stren[0]+=gamma_mat[i].real
+                stren[1]+=gamma_mat[0].real
+
+            Ps[i].vortexpanel_vel(z,stren)
+            Comple_vel+=Ps[i].complex_vel
+
+
+
+    plt.figure(figsize=(15,7.5))
 
     plt.streamplot(z.real,z.imag,Comple_vel.real,Comple_vel.imag)
     plt.axis('equal')
@@ -229,64 +283,105 @@ def problem1(n,r):
     plt.gca().add_patch(circle)
     plt.xlabel('X',fontsize=18)
     plt.ylabel('Y',fontsize=18)
-    plt.title('Stream lines with %d Constant vorticity panels'%no_panels,fontsize=18)
+    if pnl_type==0:
+        title='Stream lines with %d Constant vorticity panels'%no_panels
+    else:
+        title='Stream lines with %d Linear vorticity panels'%no_panels
+
+    plt.title(title,fontsize=18)
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
     plt.grid()
 
-        
-def error_constant_vortex():
-    plt.figure(figsize=(15,7.5))
+
+def point_ring_velocity(Vinf,num_points,pcr,origin,no_panels,radius,pnl_type):
+
+    z,t = points_generate(num_points,pcr,origin)
+
+    Ps=generate_panels(no_panels,radius,origin,pnl_type=pnl_type)
+
+    cm=assemble_coeff_mat(Ps)
+    bm=assemble_b_mat(Ps,Vinf).real
+
+    for i in range(no_panels):
+        cm[-1,i]=Ps[i].l
+    bm[-1]=0
+
+    gamma_mat=np.linalg.lstsq(cm,bm)[0]
+
+    Comple_vel=Vinf
+    for i in range(no_panels):
+        if Ps[i].pnl_type==0:
+            Ps[i].vortexpanel_vel(z,gamma_mat[i].real)
+            Comple_vel+=Ps[i].complex_vel
+        else:
+#             print(gamma_mat[i])
+            stren=np.zeros([2])
+            if i<no_panels-1:
+                stren[0]+=gamma_mat[i].real
+                stren[1]+=gamma_mat[i+1].real
+
+            else:
+                stren[0]+=gamma_mat[i].real
+                stren[1]+=gamma_mat[0].real
+
+            Ps[i].vortexpanel_vel(z,stren)
+            Comple_vel+=Ps[i].complex_vel
+
+    return Comple_vel
+
+
+def ring_velocity_error():
+    fig1=plt.figure(figsize=(15,7.5))
+    ax1=fig1.add_subplot(1,1,1)
+    fig2=plt.figure(figsize=(15,7.5))
+    ax2=fig2.add_subplot(1,1,1)
     num_points=200
     n_panels=np.asarray(range(10,100,5))
 
-    pcrs=np.linspace(1,2.5,6)[1:]
+    pcrs=np.linspace(1,2.0,6)[1:]
     for pcr in pcrs:
-        error=[]
+        error_const=[]
+        error_linear=[]
         for no_panels in n_panels:
             radius=1.0
             origin=complex(10,10)
             Vinf=complex(1.0,0)
 
+            Comple_vel_const= point_ring_velocity(Vinf,num_points,pcr,origin,no_panels,radius,0)
+            Comple_vel_linear= point_ring_velocity(Vinf,num_points,pcr,origin,no_panels,radius,1)
 
-            z,t = points_generate(num_points,pcr,origin)
-
-            Ps=generate_panels(no_panels,radius,origin)
-
-            cm=assemble_coeff_mat(Ps)
-            bm=assemble_b_mat(Ps,Vinf).real
-
-            for i in range(no_panels):
-                cm[-1,i]=Ps[i].l
-            bm[-1]=0
-
-            gamma_mat=np.linalg.lstsq(cm,bm)[0]
-
-            Comple_vel=Vinf
-            for i in range(no_panels):
-                Ps[i].vortexpanel_vel(z,gamma_mat[i])
-                Comple_vel+=Ps[i].complex_vel
 
             points,radians=points_generate(num_points,pcr,complex(0,0))
             Vexact=exact_vel(points,radians,Vinf,radius,pcr)
-            err=np.abs(Comple_vel)-Vexact
-#             error.append(np.sqrt(sum(err**2)/num_points))
+            err1=np.abs(Comple_vel_const)-Vexact
+            err2=np.abs(Comple_vel_linear)-Vexact
+#             error_const.append(np.sqrt(sum(err1**2)/num_points))
+#             error_linear.append(np.sqrt(sum(err2**2)/num_points))
 
-            error.append(sum(np.abs(Comple_vel)-Vexact)/num_points)
+            error_const.append(sum(abs(err1))/num_points)
+            error_linear.append(sum(abs(err2))/num_points)
 
-        plt.plot(n_panels,error,label='Ring radius:- %f'%pcr)        
-    plt.xlabel('No of Panels',fontsize=18)
-    plt.ylabel('Error',fontsize=18)
-    plt.title('No panels Vs Error with ring radius',fontsize=18)
-    plt.legend(loc=1,fontsize=10)
-    plt.xticks(fontsize=12)
-    plt.yticks(fontsize=12)
+        ax1.plot(n_panels,error_const,label='Constant panel, Ring radius:- %f'%pcr)
+        ax2.plot(n_panels,error_linear,label='Constant panel, Ring radius:- %f'%pcr)
+    ax1.set_xlabel('No of Panels',fontsize=18)
+    ax1.set_ylabel('Error',fontsize=18)
+    ax2.set_xlabel('No of Panels',fontsize=18)
+    ax2.set_ylabel('Error',fontsize=18)
+    ax1.legend()
+    ax2.legend()
 
-    return error,n_panels
+    ax1.set_title('No panels Vs Error with ring radius Constant panel',fontsize=18)
+    ax2.set_title('No panels Vs Error with ring radius Linear panel',fontsize=18)
+#     plt.legend(loc=1,fontsize=10)
+#     plt.xticks(fontsize=12)
+#     plt.yticks(fontsize=12)
+
+    return error_const,error_linear,n_panels
 
 def traj(no_panels,radius,dt,tf,origin=complex(0,0),Vinf=complex(0,0),
          vortex_pos=[0+0j], vortex_str=[0.0],source_pos=[0+0j],source_str=[0.0]):
-      
+
 #     t=0
 
     Ps=generate_panels(no_panels,radius,origin)
@@ -302,7 +397,7 @@ def traj(no_panels,radius,dt,tf,origin=complex(0,0),Vinf=complex(0,0),
     bm[-1]=0
 
     gamma_mat=np.linalg.lstsq(cm,bm)[0]
-    
+
 #     z=
     result=rk2_integrate(vortex_pos,vortex_pos,vortex_str,Vinf, dt ,tf,Ps,cm)
     plt.axis('equal')
@@ -314,43 +409,70 @@ def traj(no_panels,radius,dt,tf,origin=complex(0,0),Vinf=complex(0,0),
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
     plt.grid()
-    
+
     return result
 
 
-def method_of_images():
-    ''' If we want to produce a stream lines of cylinder due to a=1.0 and a vortex located at b'''
-    vortex_b_loc=complex(0,1.5)
-    strength= 2*np.pi
-    radius=1.0
-    origin=complex(0,0)
-    vortex_c_loc=complex(0,radius**2/np.abs(vortex_b_loc))
-    vortex_a_loc=origin
-    
-    z= create_mesh(-3.0,3.0,100,-2,2,100)
-    
-# def source_vel(z, source_pos, source_str):
-    Complex_vel=vortex_vel(z,vortex_b_loc,strength)+vortex_vel(z,vortex_c_loc,-strength)
-    +vortex_vel(z,vortex_a_loc,strength)
-    plt.figure(figsize=(15,7.5))
-    plt.streamplot(z.real,z.imag,Complex_vel.real,Complex_vel.imag)
-    circle = plt.Circle((origin.real,origin.imag), radius=radius, color='#0000ff', alpha=0.5)
-    plt.gca().add_patch(circle)
-    plt.xlabel('X',fontsize=18)
-    plt.ylabel('Y',fontsize=18)
-#     plt.title('Stream lines with %d Constant vorticity panels'%no_panels,fontsize=18)
-    plt.xticks(fontsize=12)
-    plt.yticks(fontsize=12)
-    plt.axis('equal')
-    plt.grid()
-    
+def images(dt,tf):
+    z=[complex(1.5,0.0),complex(1/1.5,0.0)]
+    z_src=[complex(1.5,0.0),complex(1/1.5,0.0),complex(0,0)]
+    V=complex(0,0)
+    strength=[2*np.pi,-2*np.pi,-4*np.pi]
+    result=rk2_integrate1(z,z_src,strength,V, dt ,tf)
+    plt.plot(result.real,result.imag)
+
+
+
+# def method_of_images():
+#     ''' If we want to produce a stream lines of cylinder due to a=1.0 and a vortex located at b'''
+#     vortex_b_loc=complex(0,1.5)
+#     strength= 2*np.pi
+#     radius=1.0
+#     origin=complex(0,0)
+#     vortex_c_loc=complex(0,radius**2/np.abs(vortex_b_loc))
+#     vortex_a_loc=origin
+
+#     z= create_mesh(-3.0,3.0,100,-2,2,100)
+
+# # def source_vel(z, source_pos, source_str):
+#     Complex_vel=vortex_vel(z,vortex_b_loc,strength)+vortex_vel(z,vortex_c_loc,-strength)
+#     +vortex_vel(z,vortex_a_loc,strength)
+#     plt.figure(figsize=(15,7.5))
+#     plt.streamplot(z.real,z.imag,Complex_vel.real,Complex_vel.imag)
+#     circle = plt.Circle((origin.real,origin.imag), radius=radius, color='#0000ff', alpha=0.5)
+#     plt.gca().add_patch(circle)
+#     plt.xlabel('X',fontsize=18)
+#     plt.ylabel('Y',fontsize=18)
+# #     plt.title('Stream lines with %d Constant vorticity panels'%no_panels,fontsize=18)
+#     plt.xticks(fontsize=12)
+#     plt.yticks(fontsize=12)
+#     plt.axis('equal')
+#     plt.grid()
+
+#     return Complex_vel
+
+
 
 # plt.show()
 
 if __name__ == '__main__':
+
+    single_panel(angle=35,pnl_type=0)
+    plt.savefig(os.path.join('images')+'/single_const.png')
     single_panel(angle=35,pnl_type=1)
-    problem1(35,1.0)
-    error,n_panels=error_constant_vortex()
-    result=traj(35,1.0,0.05,20.0,vortex_pos=[1.5+0j],vortex_str=[2*np.pi])
+    plt.savefig(os.path.join('images')+'/single_liner.png')
+
+    problem1(36,1.0)
+    plt.savefig(os.path.join('images')+'/const_panel.png')
+
+    problem1(36,1.0,pnl_type=1)
+    plt.savefig(os.path.join('images')+'/linear_panel.png')
+
+    error_const,error_linear,n_panels=ring_velocity_error()
+    plt.savefig(os.path.join('images')+'/const_err.png')
+    plt.savefig(os.path.join('images')+'/linear_err.png')
+    result=traj(36,1.0,0.5,20.0,vortex_pos=[1.5+0j],vortex_str=[2*np.pi])
+    plt.savefig(os.path.join('images')+'/trajec.png')
+#     images(0.005,20)
 #     method_of_images()
     plt.show()
